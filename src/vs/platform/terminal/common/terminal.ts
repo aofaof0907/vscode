@@ -336,7 +336,7 @@ export interface IShellLaunchConfig {
 	/**
 	 * This is a terminal that attaches to an already running terminal.
 	 */
-	attachPersistentProcess?: { id: number; pid: number; title: string; titleSource: TitleEventSource; cwd: string; icon?: TerminalIcon; color?: string };
+	attachPersistentProcess?: { id: number; pid: number; title: string; titleSource: TitleEventSource; cwd: string; icon?: TerminalIcon; color?: string, hasChildProcesses?: boolean };
 
 	/**
 	 * Whether the terminal process environment should be exactly as provided in
@@ -632,4 +632,4 @@ export interface IExtensionTerminalProfile extends ITerminalProfileContribution 
 }
 
 export type ITerminalProfileObject = ITerminalExecutable | ITerminalProfileSource | IExtensionTerminalProfile | null;
-export type ITerminalProfileQuickpickObject = ITerminalProfile | IExtensionTerminalProfile;
+export type ITerminalProfileType = ITerminalProfile | IExtensionTerminalProfile;

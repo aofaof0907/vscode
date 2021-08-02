@@ -124,7 +124,8 @@ export class DisassemblyView extends EditorPane {
 				multipleSelectionSupport: false,
 				setRowLineHeight: false,
 				openOnSingleClick: false,
-				accessibilityProvider: new AccessibilityProvider()
+				accessibilityProvider: new AccessibilityProvider(),
+				mouseSupport: false
 			}
 		)) as WorkbenchTable<IDisassembledInstructionEntry>;
 
@@ -203,7 +204,7 @@ export class DisassemblyView extends EditorPane {
 	/**
 	 * Go to the address provided. If no address is provided, reveal the address of the currently focused stack frame.
 	 */
-	goToAddress(address?: string): void {
+	goToAddress(address?: string, focus?: boolean): void {
 		if (!this._disassembledInstructions) {
 			return;
 		}
@@ -222,21 +223,25 @@ export class DisassemblyView extends EditorPane {
 			const bottomElement = Math.floor((this._disassembledInstructions.scrollTop + this._disassembledInstructions.renderHeight) / this.fontInfo.lineHeight);
 			if (index > topElement && index < bottomElement) {
 				// Inside the viewport, don't do anything here
-				return;
 			} else if (index <= topElement && index > topElement - 5) {
 				// Not too far from top, review it at the top
-				return this._disassembledInstructions.reveal(index, 0);
+				this._disassembledInstructions.reveal(index, 0);
 			} else if (index >= bottomElement && index < bottomElement + 5) {
 				// Not too far from bottom, review it at the bottom
-				return this._disassembledInstructions.reveal(index, 1);
+				this._disassembledInstructions.reveal(index, 1);
 			} else {
 				// Far from the current viewport, reveal it
-				return this._disassembledInstructions.reveal(index, 0.5);
+				this._disassembledInstructions.reveal(index, 0.5);
+			}
+
+			if (focus) {
+				this._disassembledInstructions.domFocus();
+				this._disassembledInstructions.setFocus([index]);
 			}
 		} else if (this._debugService.state === State.Stopped) {
 			// Address is not provided or not in the table currently, clear the table
 			// and reload if we are in the state where we can load disassembly.
-			return this.reloadDisassembly(address);
+			this.reloadDisassembly(address);
 		}
 	}
 
@@ -347,10 +352,15 @@ export class DisassemblyView extends EditorPane {
 		if (this._disassembledInstructions) {
 			this._disassembledInstructions.splice(0, this._disassembledInstructions.length);
 			this._instructionBpList = this._debugService.getModel().getInstructionBreakpoints();
-			this.loadDisassembledInstructions(targetAddress, -DisassemblyView.NUM_INSTRUCTIONS_TO_LOAD, DisassemblyView.NUM_INSTRUCTIONS_TO_LOAD * 2).then(() => {
+			this.loadDisassembledInstructions(targetAddress, -DisassemblyView.NUM_INSTRUCTIONS_TO_LOAD * 4, DisassemblyView.NUM_INSTRUCTIONS_TO_LOAD * 8).then(() => {
 				// on load, set the target instruction in the middle of the page.
 				if (this._disassembledInstructions!.length > 0) {
-					this._disassembledInstructions!.reveal(Math.floor(this._disassembledInstructions!.length / 2), 0.5);
+					const targetIndex = Math.floor(this._disassembledInstructions!.length / 2);
+					this._disassembledInstructions!.reveal(targetIndex, 0.5);
+
+					// Always focus the target address on reload, or arrow key navigation would look terrible
+					this._disassembledInstructions!.domFocus();
+					this._disassembledInstructions!.setFocus([targetIndex]);
 				}
 			});
 		}
@@ -359,9 +369,9 @@ export class DisassemblyView extends EditorPane {
 }
 
 interface IBreakpointColumnTemplateData {
-	container: HTMLElement,
-	icon: HTMLElement,
-	disposables: IDisposable[]
+	currentElement: { element?: IDisassembledInstructionEntry };
+	icon: HTMLElement;
+	disposables: IDisposable[];
 }
 
 class BreakpointRenderer implements ITableRenderer<IDisassembledInstructionEntry, IBreakpointColumnTemplateData> {
@@ -389,63 +399,67 @@ class BreakpointRenderer implements ITableRenderer<IDisassembledInstructionEntry
 		icon.style.alignItems = 'center';
 		icon.style.justifyContent = 'center';
 
-		return { container, icon, disposables: [] };
+		const currentElement: { element?: IDisassembledInstructionEntry } = { element: undefined };
+
+		const disposables = [
+			this._disassemblyView.onDidChangeStackFrame(() => this.rerenderDebugStackframe(icon, currentElement.element)),
+			addStandardDisposableListener(container, 'mouseover', () => {
+				if (currentElement.element?.allowBreakpoint) {
+					icon.classList.add(this._breakpointHintIcon);
+				}
+			}),
+			addStandardDisposableListener(container, 'mouseout', () => {
+				if (currentElement.element?.allowBreakpoint) {
+					icon.classList.remove(this._breakpointHintIcon);
+				}
+			}),
+			addStandardDisposableListener(container, 'click', () => {
+				if (currentElement.element?.allowBreakpoint) {
+					// click show hint while waiting for BP to resolve.
+					icon.classList.add(this._breakpointHintIcon);
+					if (currentElement.element.isBreakpointSet) {
+						this._debugService.removeInstructionBreakpoints(currentElement.element.instruction.address);
+
+					} else if (currentElement.element.allowBreakpoint && !currentElement.element.isBreakpointSet) {
+						this._debugService.addInstructionBreakpoint(currentElement.element.instruction.address, 0);
+					}
+				}
+			})
+		];
+
+		return { currentElement, icon, disposables };
 	}
 
 	renderElement(element: IDisassembledInstructionEntry, index: number, templateData: IBreakpointColumnTemplateData, height: number | undefined): void {
-		const rerenderDebugStackframe = () => {
-			if (element.instruction.address === this._disassemblyView.currentInstructionAddress) {
-				templateData.icon.classList.add(this._debugStackframe);
-			} else {
-				templateData.icon.classList.remove(this._debugStackframe);
-			}
-
-			templateData.icon.classList.remove(this._breakpointHintIcon);
-
-			if (element.isBreakpointSet) {
-				templateData.icon.classList.add(this._breakpointIcon);
-			} else {
-				templateData.icon.classList.remove(this._breakpointIcon);
-			}
-		};
-
-		rerenderDebugStackframe();
-		templateData.disposables.push(this._disassemblyView.onDidChangeStackFrame(rerenderDebugStackframe));
-
-		// TODO: see getBreakpointMessageAndIcon in vs\workbench\contrib\debug\browser\breakpointEditorContribution.ts
-		//       for more types of breakpoint icons
-		if (element.allowBreakpoint) {
-			templateData.disposables.push(addStandardDisposableListener(templateData.container, 'mouseover', () => {
-				templateData.icon.classList.add(this._breakpointHintIcon);
-			}));
-
-			templateData.disposables.push(addStandardDisposableListener(templateData.container, 'mouseout', () => {
-				templateData.icon.classList.remove(this._breakpointHintIcon);
-			}));
-
-			templateData.disposables.push(addStandardDisposableListener(templateData.container, 'click', () => {
-				// click show hint while waiting for BP to resolve.
-				templateData.icon.classList.add(this._breakpointHintIcon);
-				if (element.isBreakpointSet) {
-					this._debugService.removeInstructionBreakpoints(element.instruction.address);
-
-				} else if (element.allowBreakpoint && !element.isBreakpointSet) {
-					this._debugService.addInstructionBreakpoint(element.instruction.address, 0);
-				}
-			}));
-		}
+		templateData.currentElement.element = element;
+		this.rerenderDebugStackframe(templateData.icon, element);
 	}
 
-	disposeElement(element: IDisassembledInstructionEntry, index: number, templateData: IBreakpointColumnTemplateData, height: number | undefined): void {
+	disposeTemplate(templateData: IBreakpointColumnTemplateData): void {
 		dispose(templateData.disposables);
 		templateData.disposables = [];
 	}
 
-	disposeTemplate(templateData: IBreakpointColumnTemplateData): void { }
+	private rerenderDebugStackframe(icon: HTMLElement, element?: IDisassembledInstructionEntry) {
+		if (element?.instruction.address === this._disassemblyView.currentInstructionAddress) {
+			icon.classList.add(this._debugStackframe);
+		} else {
+			icon.classList.remove(this._debugStackframe);
+		}
+
+		icon.classList.remove(this._breakpointHintIcon);
+
+		if (element?.isBreakpointSet) {
+			icon.classList.add(this._breakpointIcon);
+		} else {
+			icon.classList.remove(this._breakpointIcon);
+		}
+	}
 
 }
 
 interface IInstructionColumnTemplateData {
+	currentElement: { element?: IDisassembledInstructionEntry };
 	// TODO: hover widget?
 	instruction: HTMLElement;
 	disposables: IDisposable[];
@@ -481,10 +495,19 @@ class InstructionRenderer extends Disposable implements ITableRenderer<IDisassem
 	renderTemplate(container: HTMLElement): IInstructionColumnTemplateData {
 		const instruction = append(container, $('.instruction'));
 		this.applyFontInfo(instruction);
-		return { instruction, disposables: [] };
+
+		const currentElement: { element?: IDisassembledInstructionEntry } = { element: undefined };
+
+		const disposables = [
+			this._disassemblyView.onDidChangeStackFrame(() => this.rerenderBackground(instruction, currentElement.element))
+		];
+
+		return { currentElement, instruction, disposables };
 	}
 
 	renderElement(element: IDisassembledInstructionEntry, index: number, templateData: IInstructionColumnTemplateData, height: number | undefined): void {
+		templateData.currentElement.element = element;
+
 		const instruction = element.instruction;
 		const sb = createStringBuilder(10000);
 
@@ -513,24 +536,21 @@ class InstructionRenderer extends Disposable implements ITableRenderer<IDisassem
 		const innerText = sb.build();
 		templateData.instruction.innerText = innerText;
 
-		const rerenderBackground = () => {
-			if (element.instruction.address === this._disassemblyView.currentInstructionAddress) {
-				templateData.instruction.style.background = this._topStackFrameColor?.toString() || 'transparent';
-			} else {
-				templateData.instruction.style.background = 'transparent';
-			}
-		};
-
-		rerenderBackground();
-		templateData.disposables.push(this._disassemblyView.onDidChangeStackFrame(rerenderBackground));
+		this.rerenderBackground(templateData.instruction, element);
 	}
 
-	disposeElement(element: IDisassembledInstructionEntry, index: number, templateData: IInstructionColumnTemplateData, height: number | undefined): void {
+	disposeTemplate(templateData: IInstructionColumnTemplateData): void {
 		dispose(templateData.disposables);
 		templateData.disposables = [];
 	}
 
-	disposeTemplate(templateData: IInstructionColumnTemplateData): void { }
+	private rerenderBackground(instruction: HTMLElement, element?: IDisassembledInstructionEntry) {
+		if (element?.instruction.address === this._disassemblyView.currentInstructionAddress) {
+			instruction.style.background = this._topStackFrameColor?.toString() || 'transparent';
+		} else {
+			instruction.style.background = 'transparent';
+		}
+	}
 
 	private applyFontInfo(element: HTMLElement) {
 		const fontInfo = this._disassemblyView.fontInfo;
@@ -552,16 +572,10 @@ class AccessibilityProvider implements IListAccessibilityProvider<IDisassembledI
 	getAriaLabel(element: IDisassembledInstructionEntry): string | null {
 		let label = '';
 
-		if (element.isBreakpointSet) {
-			label += localize('breakpointIsSet', "Breakpoint is set");
-		} else if (element.allowBreakpoint) {
-			label += localize('breakpointAllowed', "Can set breakpoint");
-		}
-
 		const instruction = element.instruction;
-		label += `, ${localize('instructionAddress', "Instruction address")}: ${instruction.address}`;
+		label += `${localize('instructionAddress', "Address")}: ${instruction.address}`;
 		if (instruction.instructionBytes) {
-			label += `, ${localize('instructionBytes', "Instruction bytes")}: ${instruction.instructionBytes}`;
+			label += `, ${localize('instructionBytes', "Bytes")}: ${instruction.instructionBytes}`;
 		}
 		label += `, ${localize(`instructionText`, "Instruction")}: ${instruction.instruction}`;
 

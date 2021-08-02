@@ -47,6 +47,10 @@ export function createValidator(prop: IConfigurationPropertySchema): (value: any
 			}
 		}
 
+		if (prop.type === 'boolean' && value !== true && value !== false) {
+			errors.push(nls.localize('validations.booleanIncorrectType', 'Incorrect type. Expected "boolean".'));
+		}
+
 		if (isNumeric) {
 			if (isNullOrEmpty(value) || isNaN(+value)) {
 				errors.push(nls.localize('validations.expectedNumeric', "Value must be a number."));
@@ -56,8 +60,10 @@ export function createValidator(prop: IConfigurationPropertySchema): (value: any
 		}
 
 		if (prop.type === 'string') {
-			if (!isString(value)) {
-				errors.push(nls.localize('validations.incorrectType', 'Incorrect type. Expected "string".'));
+			if (prop.enum && !isStringArray(prop.enum)) {
+				errors.push(nls.localize('validations.stringIncorrectEnumOptions', 'The enum options should be strings, but there is a non-string option. Please file an issue with the extension author.'));
+			} else if (!isString(value)) {
+				errors.push(nls.localize('validations.stringIncorrectType', 'Incorrect type. Expected "string".'));
 			} else {
 				errors.push(...stringValidations.filter(validator => !validator.isValid(value)).map(validator => validator.message));
 			}

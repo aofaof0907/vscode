@@ -383,7 +383,7 @@ export abstract class AbstractListSettingWidget<TDataItem extends object> extend
 		this.renderList();
 	}
 
-	protected cancelEdit(): void {
+	public cancelEdit(): void {
 		this.model.setEditKey('none');
 		this.renderList();
 	}
@@ -760,7 +760,7 @@ export class ListSettingWidget extends AbstractListSettingWidget<IListDataItem> 
 			siblingInput.element.classList.add('setting-list-siblingInput');
 			this.listDisposables.add(siblingInput);
 			this.listDisposables.add(attachInputBoxStyler(siblingInput, this.themeService, {
-				inputBackground: settingsSelectBackground,
+				inputBackground: settingsTextInputBackground,
 				inputForeground: settingsTextInputForeground,
 				inputBorder: settingsTextInputBorder
 			}));
@@ -834,7 +834,7 @@ export class ListSettingWidget extends AbstractListSettingWidget<IListDataItem> 
 
 		valueInput.element.classList.add('setting-list-valueInput');
 		this.listDisposables.add(attachInputBoxStyler(valueInput, this.themeService, {
-			inputBackground: settingsSelectBackground,
+			inputBackground: settingsTextInputBackground,
 			inputForeground: settingsTextInputForeground,
 			inputBorder: settingsTextInputBorder
 		}));
@@ -1174,7 +1174,7 @@ export class ObjectSettingDropdownWidget extends AbstractListSettingWidget<IObje
 		inputBox.element.classList.add('setting-list-object-input');
 
 		this.listDisposables.add(attachInputBoxStyler(inputBox, this.themeService, {
-			inputBackground: settingsSelectBackground,
+			inputBackground: settingsTextInputBackground,
 			inputForeground: settingsTextInputForeground,
 			inputBorder: settingsTextInputBorder
 		}));
@@ -1201,17 +1201,17 @@ export class ObjectSettingDropdownWidget extends AbstractListSettingWidget<IObje
 
 	private renderEnumEditWidget(
 		keyOrValue: IObjectEnumData,
-		{ isKey, originalItem, update }: IObjectRenderEditWidgetOptions,
+		{ isKey, changedItem, update }: IObjectRenderEditWidgetOptions,
 	) {
 		const selectBox = this.createBasicSelectBox(keyOrValue);
 
-		const originalKeyOrValue = isKey ? originalItem.key : originalItem.value;
+		const changedKeyOrValue = isKey ? changedItem.key : changedItem.value;
 		this.listDisposables.add(
 			selectBox.onDidSelect(({ selected }) =>
 				update(
-					originalKeyOrValue.type === 'boolean'
-						? { ...originalKeyOrValue, data: selected === 'true' ? true : false }
-						: { ...originalKeyOrValue, data: selected },
+					changedKeyOrValue.type === 'boolean'
+						? { ...changedKeyOrValue, data: selected === 'true' ? true : false }
+						: { ...changedKeyOrValue, data: selected },
 				)
 			)
 		);
@@ -1227,10 +1227,13 @@ export class ObjectSettingDropdownWidget extends AbstractListSettingWidget<IObje
 		const selected = keyOrValue.options.findIndex(option => keyOrValue.data === option.value);
 		if (selected === -1 && keyOrValue.options.length) {
 			update(
-				originalKeyOrValue.type === 'boolean'
-					? { ...originalKeyOrValue, data: true }
-					: { ...originalKeyOrValue, data: keyOrValue.options[0].value }
+				changedKeyOrValue.type === 'boolean'
+					? { ...changedKeyOrValue, data: true }
+					: { ...changedKeyOrValue, data: keyOrValue.options[0].value }
 			);
+		} else if (changedKeyOrValue.type === 'boolean') {
+			// https://github.com/microsoft/vscode/issues/129581
+			update({ ...changedKeyOrValue, data: keyOrValue.data === 'true' });
 		}
 
 		return { widget: selectBox, element: wrapper };
